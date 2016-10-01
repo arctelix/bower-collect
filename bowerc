@@ -1,0 +1,228 @@
+#!/usr/bin/env python
+
+import sys, json, os, subprocess
+
+
+class CollectBowerPackages(object):
+
+    cwd = os.getcwd()
+    root_dir = cwd
+    root_pkg_name = os.path.basename(root_dir)
+    root_json_file = '%s/bower.json' % cwd
+    root_rc_file = '%s/.bowerrc' % cwd
+    root_node_file = '%s/package.json' % cwd
+    dir_excludes = ['.', 'bower_components', 'components', 'static']
+
+    def __init__(self, app=None, directory=None, exclude='', *args):
+        print 'init %s | %s | %s' % (app, directory, args)
+        self.app_name = app or self.root_pkg_name
+        self.install_dir = directory or "static/bower_components"
+        self.dir_excludes += exclude.split(',')
+        self.dir_excludes += args
+        self.root_json_data = {}
+        self.root_rc_data = {}
+        self.root_node_data = {}
+
+        self.process_root_json_file()
+        self.process_root_rc_file()
+        self.process_root_node_file()
+
+    def process_root_node_file(self):
+        """
+        Create or updated root packages.json file
+        """
+        data = {
+            "engines": {
+                "node": subprocess.check_output(['node', '--version']).rstrip()
+            },
+            "dependencies": {
+                "bower": subprocess.check_output(['bower', '--version']).rstrip()
+            },
+            "scripts": {
+                "postinstall": "bower install"
+            }
+        }
+        self.root_node_data = self.process_json_file(self.root_node_file, data)
+
+    def process_root_rc_file(self):
+        """
+        Create or updated root bower.rc file
+        """
+        data = {
+            "directory": "%s/%s" % (self.app_name, self.install_dir)
+        }
+        self.root_rc_data = self.process_json_file(self.root_rc_file, data, data)
+        print ('  Install directory: %s/%s' % (self.app_name, self.install_dir))
+
+    def process_root_json_file(self):
+        """
+        Create or updated root bower.json file
+        """
+        data = {
+            "name": self.root_pkg_name,
+            "dependencies": {},
+            "ignore": ['*'],
+            "private": "true"
+        }
+
+        # get exiting data from file
+        data = self.process_json_file(self.root_json_file, data, write=False)
+
+        # check for deps
+        deps = self.collect_dependencies(data)
+        if not deps:
+            print ("No dependencies found in %s" % self.root_pkg_name)
+            exit()
+
+        # Update root package name from file dta
+        self.root_pkg_name = data.get('name', self.root_pkg_name)
+
+        # Update file with deps
+        self.root_json_data = self.process_json_file(self.root_json_file, data, deps)
+
+    def process_json_file(self, path, data, override=None, write=True):
+        """
+        Create or update a json file with a data dict
+        :param path: Path to file containing json data
+        :param data: Base data to update file with (superseded by file data)
+        :param override: Data to override file and base data
+        :param write: True: Write new data to file or False: return data
+        :return: {} | None
+        """
+        file_name = os.path.basename(path)
+
+        if write:
+            print ('Processing %s for %s' % (file_name, self.root_pkg_name))
+
+        data = data.copy()
+
+        status = 'updated'
+        try:
+            # Update data with data from file
+            with open(path, 'r') as data_file:
+                data.update(json.load(data_file))
+
+        except ValueError:
+            # Empty file, overwrite
+            if os.stat(path).st_size == 0:
+                pass
+            # Invalid JSON, overwrite or skip
+            else:
+                if not write:
+                    return data
+                else:
+                    print ('  WARNING invalid json: %s' % path)
+                    resp = raw_input('  Overwrite the file [y/N]?')
+                    if resp.lower() not in ['y', 'yes', ]:
+                        status = 'failed'
+
+        except IOError:
+            status = 'created'
+
+        if not write:
+            return data
+
+        # Overwrite data with additional data
+        if status != 'failed':
+            if override:
+                data.update(override)
+
+            with open(path, 'w') as outfile:
+                json.dump(data, outfile, indent=4, sort_keys=True)
+
+        print ('  [ %s ] %s for %s' % (status, file_name, self.root_pkg_name))
+        return data
+
+    @staticmethod
+    def find_files(name, path, exclude_dirs):
+        """
+        Search path subdirectories for files matching a name
+        :param name: File name to match
+        :param path: Top level directory
+        :param exclude_dirs: Directories to exclude from matches
+        :return: [(str, str)] List of tuples (directory_path, file_path)
+        """
+        exclude_dirs = set(exclude_dirs)
+        result = []
+        for root, dirs, files in os.walk(path, topdown=True):
+            dirs[:] = [d for d in dirs if d not in exclude_dirs ]
+            if name in files and root not in exclude_dirs:
+                result.append((root, os.path.join(root, name)))
+        return result
+
+    def collect_dependencies(self, exist_data):
+        """
+        Find sub packages and add as deps to root bower.json file
+        """
+        print ('Collecting dependencies for %s' % self.root_pkg_name)
+
+        files = self.find_files('bower.json', '.', self.dir_excludes)
+        deps = {}
+
+        for path, bower_file in files:
+            mode = 'added'
+            error = None
+            package_name = os.path.basename(path)
+
+            try:
+                with open(bower_file) as data_file:
+                    data = json.load(data_file)
+
+            except ValueError as e:
+                if os.stat(path).st_size == 0:
+                    error = 'Empty File'
+                else:
+                    error = 'Invalid JSON'
+
+                print ('  Skipped dependency %s %s:%s' % (package_name, error, bower_file))
+                continue
+
+            package_name = data.get('name', package_name)
+
+
+            ex_deps = exist_data.get('dependencies')
+            if package_name in ex_deps.keys():
+                if ex_deps[package_name] != path:
+                    mode = 'updated'
+                else:
+                    mode = 'existing'
+
+            print ('  %s dependency %s @ %s' % (mode.capitalize(), package_name, path))
+            deps.update({package_name: path})
+
+        if not deps:
+            return None
+        return {'dependencies': deps}
+
+if __name__ == "__main__":
+
+    # Check for collect arg or run bower command and exit
+    if len(sys.argv) < 2 or sys.argv[1] != 'collect':
+        sys.argv[0] = "bower"
+        rv = subprocess.call(sys.argv)
+        sys.exit(rv)
+
+    # Remove collect arg
+    sys.argv.pop(1)
+
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Collect bower sub-packages')
+    parser.add_argument('-a', '--app', type=str,
+                        help='Destination app for collected dependencies.  '
+                             'default: root directory name')
+    parser.add_argument('-d', '--directory', type=str,
+                        help='App destination directory for collected dependencies.  '
+                             'default: static/bower_components')
+    parser.add_argument('-e', '--exclude', type=str, default='',
+                        help='CS list of directories to exclude from search.  '
+                             'default: static,bower_components,components')
+
+    args = parser.parse_args()
+
+    CollectBowerPackages(**vars(args))
+
+
+
+
+
