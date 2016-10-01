@@ -9,6 +9,7 @@ bower-collect
 Use all other bower commands exactly as you did before.
 
 OPTIONS:
+
     -a | --app       Specify root directory to install dependancies
                      default: A directory with the same name as pwd
     
