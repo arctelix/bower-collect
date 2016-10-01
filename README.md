@@ -31,18 +31,25 @@ Running the collect command simply searches for local bower packages in your pro
 
 This is a local command that adds noting to your apps server footprint, it siply sets up your project to work the way it's suposed to.  If your utilizing grunt for many other things then it's no big deal, but Why install grunt and run an extra set of commands when bower is quite capeable of getting the job done.  Apps like django-bower just get in the way of using bower properly and are simply not necessary. 
 
-## Ok fine, how do I get my project to work with heroku?
+## Ok fine, how do I get Django + Bower + Heroku woring? 
     
+Run `bowerc collect` in your project root directoy 
+
+There will be three new files in your project root   
+,bowerrc, bower.json, package.json, add them to git and commit the changes.
+
 Check your buildpack list:
 
     heroku buildpack --app your-app-name
 
 Add the nodejs buildpack to your herku app at index 1, if it's not there already
 
-    herou buildpack:add heroku/nodejs --index 1 --app your-app-name
+    heroku buildpack:add heroku/nodejs --index 1 --app your-app-name
 
 Remove any muti buildpacks or other special build pacs for getting bower to work with your project
 and make sure you have the heroku buildpack for you app's platform installed. heroku/python, heroku/python3, heroku/ruby, etc..
+
+Finally push your project to heroku as you normally would. You will see heroku install node and bower, install your bower dependancies, then build your app as usual.
 
 ## Instalation
 
